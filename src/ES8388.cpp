@@ -1,259 +1,229 @@
-#include "es8388.h"
+#include "ES8388.h"
 
-#define ES8388_ADDR 0b0010000
-
-static const char *ES_TAG = "ES8388_DRIVER";
-
-
-es8388::es8388()
-{
+ES8388::ES8388() {
+    _address = ES8388_ADDR;
 }
 
-bool es8388::begin( TwoWire *theWire )
-{
-	  if (i2c_dev)
-	    delete i2c_dev;
-	  i2c_dev = new Adafruit_I2CDevice(ES8388_ADDR, theWire);
-	  if (!i2c_dev->begin())
-	    return false;
-
-	  return true;
-
-}
-
-bool es8388::i2c_write( uint8_t reg, uint8_t value)
-{
-	uint8_t buffer[2] = {reg, value};
-	if (i2c_dev->write(buffer, 2)) {
-	    return true;
-	} else {
-	    return false;
-	}
-}
-
-
-bool es8388::i2c_read( uint8_t reg, uint8_t* value )
-{
-	if (i2c_dev->write_then_read(&reg, 1, value, 1)) {
-	    return true;
-	} else {
-	    return false;
-	}
-}
-
-bool es8388::es_write_reg(uint8_t reg_add, uint8_t data)
-{
-    return i2c_write( reg_add, data );
-}
-
-bool es8388::es_read_reg(uint8_t reg_add, uint8_t *p_data)
-{
-    return i2c_read( reg_add, p_data );
-}
-
-void es8388::read_all()
-{
-    for (int i = 0; i < 50; i++) {
-        uint8_t reg = 0;
-        es_read_reg(i, &reg);
-    }
-}
-
-int es8388::set_adc_dac_volume(int mode, int volume, int dot)
-{
-    int res = 0;
-    if ( volume < -96 || volume > 0 ) {
-        if (volume < -96)
-            volume = -96;
-        else
-            volume = 0;
-    }
-    dot = (dot >= 5 ? 1 : 0);
-    volume = (-volume << 1) + dot;
-    if (mode == ES_MODULE_ADC || mode == ES_MODULE_ADC_DAC) {
-        res |= es_write_reg(ES8388_ADCCONTROL8, volume);
-        res |= es_write_reg(ES8388_ADCCONTROL9, volume);  //ADC Right Volume=0db
-    }
-    if (mode == ES_MODULE_DAC || mode == ES_MODULE_ADC_DAC) {
-        res |= es_write_reg(ES8388_DACCONTROL5, volume);
-        res |= es_write_reg(ES8388_DACCONTROL4, volume);
-    }
-    return res;
-}
-
-bool es8388::init( es_dac_output_t output, es_adc_input_t input )
-{
-    int res = 0;
-
-    res |= es_write_reg(ES8388_DACCONTROL3, 0x04);  // 0x04 mute/0x00 unmute&ramp;DAC unmute and  disabled digital volume control soft ramp
-
-    res |= es_write_reg(ES8388_CONTROL2, 0x50);
-    res |= es_write_reg(ES8388_CHIPPOWER, 0x00); //normal all and power up all
-    res |= es_write_reg(ES8388_MASTERMODE, ES_MODE_SLAVE ); //CODEC IN I2S SLAVE MODE
-
-    res |= es_write_reg(ES8388_DACPOWER, 0xC0);  //disable DAC and disable Lout/Rout/1/2
-    res |= es_write_reg(ES8388_CONTROL1, 0x12);  //Enfr=0,Play&Record Mode,(0x17-both of mic&paly)
-    res |= es_write_reg(ES8388_DACCONTROL1, 0x18);//1a 0x18:16bit iis , 0x00:24
-    res |= es_write_reg(ES8388_DACCONTROL2, 0x02);  //DACFsMode,SINGLE SPEED; DACFsRatio,256
-    res |= es_write_reg(ES8388_DACCONTROL16, 0x00); // 0x00 audio on LIN1&RIN1,  0x09 LIN2&RIN2
-    res |= es_write_reg(ES8388_DACCONTROL17, 0x90); // only left DAC to left mixer enable 0db
-    res |= es_write_reg(ES8388_DACCONTROL20, 0x90); // only right DAC to right mixer enable 0db
-    res |= es_write_reg(ES8388_DACCONTROL21, 0x80); //set internal ADC and DAC use the same LRCK clock, ADC LRCK as internal LRCK
-    res |= es_write_reg(ES8388_DACCONTROL23, 0x00);   //vroi=0
-    res |= set_adc_dac_volume(ES_MODULE_DAC, 0, 0);          // 0db
-
-    res |= es_write_reg(ES8388_DACPOWER, output );
-    res |= es_write_reg(ES8388_ADCPOWER, 0xFF);
-    res |= es_write_reg(ES8388_ADCCONTROL1, 0x11); // MIC Left and Right channel PGA gain
-
-
-    res |= es_write_reg(ES8388_ADCCONTROL2, input);
-
-    res |= es_write_reg(ES8388_ADCCONTROL3, 0x02);
-    res |= es_write_reg(ES8388_ADCCONTROL4, 0x0d); // Left/Right data, Left/Right justified mode, Bits length, I2S format
-    res |= es_write_reg(ES8388_ADCCONTROL5, 0x02);  //ADCFsMode,singel SPEED,RATIO=256
-    //ALC for Microphone
-    res |= set_adc_dac_volume(ES_MODULE_ADC, 0, 0);      // 0db
-    res |= es_write_reg(ES8388_ADCPOWER, 0x09); //Power on ADC, Enable LIN&RIN, Power off MICBIAS, set int1lp to low power mode
-
-    return res;
-}
-
-// This function sets the I2S format which can be one of
-//		I2S_NORMAL
-//		I2S_LEFT		Left Justified
-//		I2S_RIGHT,      Right Justified
-//		I2S_DSP,        dsp/pcm format
-//
-// and the bits per sample which must be one of
-//		BIT_LENGTH_16BITS
-//		BIT_LENGTH_18BITS
-//		BIT_LENGTH_20BITS
-//		BIT_LENGTH_24BITS
-//		BIT_LENGTH_32BITS
-//
-// Note the above must match the ESP-IDF I2S configuration which is set separately
-
-bool es8388::config_i2s( es_bits_length_t bits_length, es_module_t mode, es_format_t fmt )
-{
-    bool res = ESP_OK;
-    uint8_t reg = 0;
-
-    // Set the Format
-    if (mode == ES_MODULE_ADC || mode == ES_MODULE_ADC_DAC) {
-        printf( "Setting I2S ADC Format\n");
-        res = es_read_reg(ES8388_ADCCONTROL4, &reg);
-        reg = reg & 0xfc;
-        res |= es_write_reg(ES8388_ADCCONTROL4, reg | fmt);
-    }
-    if (mode == ES_MODULE_DAC || mode == ES_MODULE_ADC_DAC) {
-        printf( "Setting I2S DAC Format\n");
-        res = es_read_reg(ES8388_DACCONTROL1, &reg);
-        reg = reg & 0xf9;
-        res |= es_write_reg(ES8388_DACCONTROL1, reg | (fmt << 1));
+bool ES8388::begin(TwoWire *wire) {
+    _wire = wire;
+    // _wire->begin(); // Removed: User must initialize Wire before calling begin()
+    
+    // Check if device is connected
+    _wire->beginTransmission(_address);
+    if (_wire->endTransmission() != 0) {
+        return false;
     }
 
+    // Soft Reset
+    writeRegister(ES8388_DACCONTROL3, 0x04); // Mute DAC
+    writeRegister(ES8388_CONTROL2, 0x7F);    // Reset all
+    writeRegister(ES8388_CHIPPOWER, 0xF0);   // Power down
+    delay(10);
+    writeRegister(ES8388_CONTROL2, 0x00);    // Release reset
+    
+    // Power Management
+    writeRegister(ES8388_CHIPPOWER, 0x00);   // Normal power
+    writeRegister(ES8388_DACPOWER, 0x3C);    // Power up DAC
+    writeRegister(ES8388_ADCPOWER, 0x00);    // Power up ADC
+    writeRegister(ES8388_ANAVOLMANAG, 0x7C); // Analog power set
 
-    // Set the Sample bits length
-    int bits = (int)bits_length;
-    if (mode == ES_MODULE_ADC || mode == ES_MODULE_ADC_DAC) {
-        printf( "Setting I2S ADC Bits: %d\n", bits);
-        res = es_read_reg(ES8388_ADCCONTROL4, &reg);
-        reg = reg & 0xe3;
-        res |=  es_write_reg(ES8388_ADCCONTROL4, reg | (bits << 2));
-    }
-    if (mode == ES_MODULE_DAC || mode == ES_MODULE_ADC_DAC) {
-        ESP_LOGE(ES_TAG, "Setting I2S DAC Bits: %d\n", bits);
-        res = es_read_reg(ES8388_DACCONTROL1, &reg);
-        reg = reg & 0xc7;
-        res |= es_write_reg(ES8388_DACCONTROL1, reg | (bits << 3));
-    }
-    return res;
+    // Slave Mode (Default)
+    writeRegister(ES8388_MASTERMODE, 0x00); 
+
+    // DAC Control
+    writeRegister(ES8388_DACCONTROL1, 0x18); // DVDD, 16-bit, I2S
+    writeRegister(ES8388_DACCONTROL2, 0x02); // DACL/R mixed
+    writeRegister(ES8388_DACCONTROL16, 0x00); // 0dB gain
+    writeRegister(ES8388_DACCONTROL17, 0x90); // Enable Left DAC to Left Mixer
+    writeRegister(ES8388_DACCONTROL20, 0x90); // Enable Right DAC to Right Mixer
+    writeRegister(ES8388_DACCONTROL21, 0x80); // DAC DRC enable
+    writeRegister(ES8388_DACCONTROL23, 0x00); // 0dB
+    
+    // Set LOUT/ROUT Output Mixer Volume to 0dB (Max)
+    // Register 38 (0x26) - DAC Control 16: DAC Volume Control
+    // Register 46 (0x2E) - DAC Control 24: LOUT1 Volume
+    // Register 47 (0x2F) - DAC Control 25: ROUT1 Volume
+    // Register 48 (0x30) - DAC Control 26: LOUT2 Volume
+    // Register 49 (0x31) - DAC Control 27: ROUT2 Volume
+    // Value: 0x00 = 0dB (Max), 0x21 = -33dB (Min) for analog output
+    
+    // Default analog output volume to max (0dB)
+    writeRegister(ES8388_DACCONTROL24, 0x1E); // LOUT1 Volume (0x1E is default +0dB roughly in some docs, but 0x00 is max. Let's try 0x00 for max or 0x1E for safe high)
+    // Actually, datasheet says:
+    // 0x2E-0x31: Analog Output Volume.
+    // Range: 0x00 (-30dB) to 0x1E (0dB) ... Wait, let's check datasheet
+    // ES8388 Datasheet:
+    // Reg 46-49: 
+    // 00000 = -30dB
+    // ...
+    // 11110 = 0dB
+    // 11111 = 0dB
+    // So 0x1E (30) is 0dB (Max). 
+    
+    writeRegister(ES8388_DACCONTROL24, 0x1E); // LOUT1 Volume 0dB
+    writeRegister(ES8388_DACCONTROL25, 0x1E); // ROUT1 Volume 0dB
+    writeRegister(ES8388_DACCONTROL26, 0x1E); // LOUT2 Volume 0dB
+    writeRegister(ES8388_DACCONTROL27, 0x1E); // ROUT2 Volume 0dB
+
+    // ADC Control
+    writeRegister(ES8388_ADCCONTROL1, 0x88); // MIC gain +24dB
+    writeRegister(ES8388_ADCCONTROL2, 0xF0); 
+    writeRegister(ES8388_ADCCONTROL3, 0x00);
+    writeRegister(ES8388_ADCCONTROL4, 0x0C); // 16-bit, I2S
+    writeRegister(ES8388_ADCCONTROL5, 0x02); // 0dB
+
+    setVolume(60); // Default volume
+    
+    return true;
 }
 
-
-bool es8388::set_voice_mute(bool enable)
-{
-    bool res = ESP_OK;
-    uint8_t reg = 0;
-    res = es_read_reg(ES8388_DACCONTROL3, &reg);
-    reg = reg & 0xFB;
-    res |= es_write_reg(ES8388_DACCONTROL3, reg | (((int)enable) << 2));
-    return res;
+void ES8388::setVolume(uint8_t volume) {
+    if (volume > 100) volume = 100;
+    
+    // Analog Output Volume Control (Reg 46-49)
+    // Range: 0x00 (-30dB) to 0x1E (0dB)
+    // Map 0-100 to 0x00-0x1E (0-30)
+    
+    uint8_t analog_vol = volume * 30 / 100;
+    
+    writeRegister(ES8388_DACCONTROL24, analog_vol); // LOUT1 Volume
+    writeRegister(ES8388_DACCONTROL25, analog_vol); // ROUT1 Volume
+    writeRegister(ES8388_DACCONTROL26, analog_vol); // LOUT2 Volume
+    writeRegister(ES8388_DACCONTROL27, analog_vol); // ROUT2 Volume
 }
 
-bool es8388::start(es_module_t mode)
-{
-    bool res = ESP_OK;
-    uint8_t prev_data = 0, data = 0;
-    es_read_reg(ES8388_DACCONTROL21, &prev_data);
-    if (mode == ES_MODULE_LINE) {
-        res |= es_write_reg(ES8388_DACCONTROL16, 0x09); // 0x00 audio on LIN1&RIN1,  0x09 LIN2&RIN2 by pass enable
-        res |= es_write_reg(ES8388_DACCONTROL17, 0x50); // left DAC to left mixer enable  and  LIN signal to left mixer enable 0db  : bupass enable
-        res |= es_write_reg(ES8388_DACCONTROL20, 0x50); // right DAC to right mixer enable  and  LIN signal to right mixer enable 0db : bupass enable
-        res |= es_write_reg(ES8388_DACCONTROL21, 0xC0); //enable adc
+void ES8388::mute(bool enable) {
+    uint8_t reg = readRegister(ES8388_DACCONTROL3);
+    if (enable) {
+        reg |= 0x04; // Set mute bit
     } else {
-        res |= es_write_reg(ES8388_DACCONTROL21, 0x80);   //enable dac
+        reg &= ~0x04; // Clear mute bit
     }
-    es_read_reg(ES8388_DACCONTROL21, &data);
-    if (prev_data != data) {
-    	printf( "Resetting State Machine\n");
-
-        res |= es_write_reg(ES8388_CHIPPOWER, 0xF0);   //start state machine
-        // res |= es_write_reg(ES8388_CONTROL1, 0x16);
-        // res |= es_write_reg(ES8388_CONTROL2, 0x50);
-        res |= es_write_reg(ES8388_CHIPPOWER, 0x00);   //start state machine
-    }
-    if (mode == ES_MODULE_ADC || mode == ES_MODULE_ADC_DAC || mode == ES_MODULE_LINE) {
-    	printf( "Powering up ADC\n");
-        res |= es_write_reg(ES8388_ADCPOWER, 0x00);   //power up adc and line in
-    }
-    if (mode == ES_MODULE_DAC || mode == ES_MODULE_ADC_DAC || mode == ES_MODULE_LINE) {
-    	printf( "Powering up DAC\n");
-        res |= es_write_reg(ES8388_DACPOWER, 0x3c);   //power up dac and line out
-        res |= set_voice_mute(false);
-    }
-
-    return res;
+    writeRegister(ES8388_DACCONTROL3, reg);
 }
 
-
-bool es8388::set_voice_volume(int volume)
-{
-    bool res = ESP_OK;
-    if (volume < 0)
-        volume = 0;
-    else if (volume > 100)
-        volume = 100;
-    volume /= 3;
-    res = es_write_reg(ES8388_DACCONTROL24, volume);
-    res |= es_write_reg(ES8388_DACCONTROL25, volume);
-    res |= es_write_reg(ES8388_DACCONTROL26, volume);
-    res |= es_write_reg(ES8388_DACCONTROL27, volume);
-    return res;
+void ES8388::setInput(uint8_t input) {
+    // Simplified input selection
+    // 0x00: Lin1/Rin1
+    // 0x50: Lin2/Rin2
+    // Differential vs Single ended logic is complex, keeping simple
+    
+    // ADC Input selection
+    // Reg 10 (0x0A) - ADCCONTROL2
+    // Bits 7-6: LINSEL, Bits 5-4: RINSEL
+    
+    uint8_t reg = 0x00;
+    if (input == ES8388_INPUT_MIC1) {
+         reg = 0x00; // LIN1/RIN1
+    } else if (input == ES8388_INPUT_MIC2) {
+         reg = 0x50; // LIN2/RIN2
+    }
+    writeRegister(ES8388_ADCCONTROL2, reg);
 }
 
+void ES8388::setOutput(uint8_t output) {
+    // Power up/down specific outputs
+    // Reg 04 (0x04) - DACPOWER
+    // Bit 4: Lout1, Bit 3: Rout1, Bit 2: Lout2, Bit 1: Rout2
+    
+    uint8_t reg = 0x00; // Default all on
+    // Logic: 1 = enable (in our API), but register might be 1=enable or 0=enable?
+    // Datasheet: 1=Enable.
+    
+    if (output & ES8388_OUTPUT_LOUT1) reg |= 0x10;
+    if (output & ES8388_OUTPUT_ROUT1) reg |= 0x08;
+    if (output & ES8388_OUTPUT_LOUT2) reg |= 0x04;
+    if (output & ES8388_OUTPUT_ROUT2) reg |= 0x02;
+    
+    writeRegister(ES8388_DACPOWER, reg);
+}
 
-void es8388::config( int bits, es_dac_output_t output, es_adc_input_t input, int volume )
-{
+void ES8388::config(uint8_t bits, uint32_t sampleRate) {
+    // Configure bit depth
+    uint8_t val = 0;
+    switch(bits) {
+        case 16: val = 0x0C; break; // 16-bit
+        case 24: val = 0x00; break; // 24-bit
+        case 32: val = 0x04; break; // 32-bit
+        default: val = 0x0C; break;
+    }
+    
+    // Set for both ADC and DAC (assuming symmetric)
+    // DAC Control 1 (0x17) bits 2:1
+    // ADC Control 4 (0x0C) bits 4:2 (Wait, check bits)
+    
+    // ADC Control 4: 0x0C
+    // Bits 4-2: 000=24, 001=20, 010=18, 011=16, 100=32
+    uint8_t adc_bits = 0;
+    switch(bits) {
+        case 16: adc_bits = 0x0C; break; // 011 << 2 = 0x0C
+        case 24: adc_bits = 0x00; break;
+        case 32: adc_bits = 0x10; break; // 100 << 2 = 0x10
+        default: adc_bits = 0x0C; break;
+    }
+    writeRegister(ES8388_ADCCONTROL4, adc_bits);
 
-    init( output, input );
+    // DAC Control 1: 0x17
+    // Bits 5-3: Word Length (000=24, 001=20, 010=18, 011=16, 100=32)
+    // Bits 2-1: Format (00=I2S, 01=Left, 10=DSP, 11=Right)
+    
+    // We assume I2S format (00) for Bits 2-1
+    // For 16-bit, we need 011 in Bits 5-3 -> 0001 1000 -> 0x18
+    
+    uint8_t dac_bits = 0;
+    switch(bits) {
+        case 16: dac_bits = 0x18; break; // 16-bit
+        case 24: dac_bits = 0x00; break; // 24-bit
+        case 32: dac_bits = 0x20; break; // 32-bit (100 << 3)
+        default: dac_bits = 0x18; break;
+    }
+    
+    uint8_t reg = readRegister(ES8388_DACCONTROL1);
+    reg &= ~0x3E; // Clear bits 5-1 (Word length and Format)
+    reg |= dac_bits;
+    writeRegister(ES8388_DACCONTROL1, reg);
+}
 
-    es_bits_length_t bits_length;
+void ES8388::setMicGain(uint8_t gainDb) {
+    if (gainDb > 24) gainDb = 24;
+    uint8_t gain = gainDb / 3;
+    // Register 0x09: Bits 7:4=Left Gain, 3:0=Right Gain
+    uint8_t val = (gain << 4) | gain;
+    writeRegister(ES8388_ADCCONTROL1, val);
+}
 
-    if ( bits == 16 )
-    	bits_length = BIT_LENGTH_16BITS;
-    else if ( bits == 24 )
-    	bits_length = BIT_LENGTH_24BITS;
-    else if ( bits == 32 )
-    	bits_length = BIT_LENGTH_32BITS;
+void ES8388::setHPF(bool enable) {
+    // Register 0x0E (14): 0x30 = Enable HPF for both channels
+    uint8_t val = enable ? 0x30 : 0x00;
+    writeRegister(ES8388_ADCCONTROL6, val);
+}
 
+void ES8388::setNoiseGate(uint8_t threshold) {
+    if (threshold < 1) threshold = 1;
+    if (threshold > 31) threshold = 31;
+    // Register 0x15 (ADC Control 13): Bit 7:6=Mute Attenuation (11=Min), Bit 5:0=Threshold
+    // Note: Assuming User's Noise Gate threshold maps to this ALC register
+    uint8_t val = 0xC0 | (threshold & 0x1F);
+    writeRegister(ES8388_ADCCONTROL13, val);
+}
 
-    es_module_t module = ES_MODULE_ADC_DAC;
-    es_format_t fmt = I2S_NORMAL;
+void ES8388::setVolumeRaw(uint8_t vol_l, uint8_t vol_r) {
+    // User code uses Digital Volume Control (Reg 0x1A, 0x1B)
+    writeRegister(ES8388_DACCONTROL4, vol_l);
+    writeRegister(ES8388_DACCONTROL5, vol_r);
+}
 
-    config_i2s( bits_length, ES_MODULE_ADC_DAC, fmt );
-    set_voice_volume( volume );
-    start( module );
+void ES8388::writeRegister(uint8_t reg, uint8_t value) {
+    _wire->beginTransmission(_address);
+    _wire->write(reg);
+    _wire->write(value);
+    _wire->endTransmission();
+}
 
+uint8_t ES8388::readRegister(uint8_t reg) {
+    _wire->beginTransmission(_address);
+    _wire->write(reg);
+    _wire->endTransmission(false); // Restart
+    _wire->requestFrom(_address, (uint8_t)1);
+    return _wire->read();
 }
