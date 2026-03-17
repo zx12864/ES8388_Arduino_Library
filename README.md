@@ -7,10 +7,12 @@ This library handles the configuration and control of the ES8388 chip (volume, i
 ## Features
 
 - **Initialization**: Easy setup via I2C.
-- **Volume Control**: Set output volume (0-100) and mute/unmute.
-- **Input Selection**: Switch between MIC1, MIC2, LINE1, LINE2.
+- **Volume Control**: Set analog output volume (0-100) mapping to -30dB to 0dB.
+- **Input Selection**: Switch between MIC1, MIC2.
 - **Output Selection**: Enable/Disable LOUT1, ROUT1, LOUT2, ROUT2.
 - **Format Configuration**: Support for 16/24/32-bit data and various sample rates.
+- **Microphone Gain**: Adjustable microphone gain (0-24dB).
+- **Noise Gate**: Configurable noise gate threshold.
 
 ## Hardware Connection
 
@@ -40,30 +42,35 @@ The ES8388 communicates configuration via I2C and audio data via I2S.
 ### Include the Library
 ```cpp
 #include <Wire.h>
-#include <ES8388.h>
+#include "ES8388.h"
 ```
 
 ### Initialization
 ```cpp
-ES8388 codec;
+ES8388 es;
 
 void setup() {
   Wire.begin(); // Initialize I2C
   
   // Start the codec
-  if (!codec.begin()) {
+  if (!es.begin(&Wire)) {
     Serial.println("ES8388 not found!");
     while(1);
   }
   
   // Configure codec (16-bit, 44.1kHz)
-  codec.config(16, 44100);
+  es.config(16, 44100);
   
-  // Set initial volume
-  codec.setVolume(60);
+  // Set initial volume (0-100)
+  // 0 = -30dB (Min), 100 = 0dB (Max)
+  es.setVolume(80);
   
   // Select Output (LOUT1/ROUT1)
-  codec.setOutput(ES8388_OUTPUT_LOUT1 | ES8388_OUTPUT_ROUT1);
+  es.setOutput(ES8388_OUTPUT_LOUT1 | ES8388_OUTPUT_ROUT1);
+  
+  // Select Input (MIC1)
+  es.setInput(ES8388_INPUT_MIC1);
+  es.setMicGain(18); // Set Mic Gain to 18dB
 }
 ```
 
@@ -72,9 +79,14 @@ void setup() {
 ### `bool begin(TwoWire *wire = &Wire)`
 Initializes the ES8388 codec. Returns `true` if successful, `false` otherwise.
 
+### `void config(uint8_t bits, uint32_t sampleRate)`
+Configures the audio format (16/24/32 bits) and sample rate.
+
 ### `void setVolume(uint8_t volume)`
-Sets the output volume.
+Sets the analog output volume.
 - `volume`: 0 to 100.
+  - 0 maps to -30dB.
+  - 100 maps to 0dB.
 
 ### `void mute(bool enable)`
 Mutes or unmutes the output.
@@ -85,8 +97,6 @@ Selects the input source.
 - `input`: 
     - `ES8388_INPUT_MIC1`
     - `ES8388_INPUT_MIC2`
-    - `ES8388_INPUT_LINE1`
-    - `ES8388_INPUT_LINE2`
 
 ### `void setOutput(uint8_t output)`
 Selects the active outputs. Can be combined using bitwise OR `|`.
@@ -96,11 +106,14 @@ Selects the active outputs. Can be combined using bitwise OR `|`.
     - `ES8388_OUTPUT_LOUT2`
     - `ES8388_OUTPUT_ROUT2`
 
-### `void config(uint8_t bits, uint32_t sampleRate)`
-Configures the audio format.
-- `bits`: Bit depth (16, 24, 32).
-- `sampleRate`: Audio sample rate (e.g., 44100, 48000).
+### `void setMicGain(uint8_t gainDb)`
+Sets the microphone input gain.
+- `gainDb`: 0 to 24 dB (in 3dB steps).
 
-## License
+### `void setNoiseGate(uint8_t threshold)`
+Sets the noise gate threshold.
+- `threshold`: 0 to 31.
 
-This library is open-source.
+### `void setHPF(bool enable)`
+Enables or disables the High Pass Filter (HPF) for ADC.
+- `enable`: `true` to enable, `false` to disable.
