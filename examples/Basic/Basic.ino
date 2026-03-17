@@ -1,7 +1,7 @@
 #include <Wire.h>
 #include "ES8388.h"
 
-// Define I2C Pins if different from default
+// 如果與預設不同，請定義 I2C 接腳
 // #define SDA_PIN 21
 // #define SCL_PIN 22
 
@@ -13,11 +13,11 @@ void setup() {
 
   Serial.println("ES8388 Basic Example");
 
-  // Initialize I2C
+  // 初始化 I2C
   // Wire.begin(SDA_PIN, SCL_PIN);
   Wire.begin(); 
 
-  // Initialize the codec
+  // 初始化編解碼器
   Serial.print("Initializing ES8388...");
   if (!es.begin(&Wire)) {
     Serial.println("Failed!");
@@ -25,29 +25,32 @@ void setup() {
   }
   Serial.println("OK");
 
-  // Configure for 16-bit, 44.1kHz (Slave mode)
-  // Note: The actual I2S data must be provided by the microcontroller (e.g. ESP32 I2S)
-  // This library only handles the I2C configuration of the codec.
+  // 列印暫存器狀態用於除錯
+  // es.dumpRegisters();
+
+  // 設定為 16 位元，44.1kHz（從屬模式）
+  // 注意：實際 I2S 資料必須由微控制器提供（例如 ESP32 I2S）
+  // 此函式庫僅處理編解碼器的 I2C 設定。
   es.config(16, 44100);
   
-  // Select Output
+  // 選擇輸出
   es.setOutput(ES8388_OUTPUT_LOUT1 | ES8388_OUTPUT_ROUT1);
   
-  // Set Volume (0-100)
-  // 0 = -30dB (Min), 100 = 0dB (Max)
+  // 設定音量 (0-100)
+  // 0 = -30dB（最小），100 = 0dB（最大）
   es.setVolume(80);
   Serial.println("Volume set to 80");
 
-  // Select Input
+  // 選擇輸入
   es.setInput(ES8388_INPUT_MIC1);
   
-  // Set Microphone Gain (0-24dB)
+  // 設定麥克風增益 (0-24dB)
   es.setMicGain(18);
   Serial.println("Mic Gain set to 18dB");
 }
 
 void loop() {
-  // Toggle mute every 5 seconds to demonstrate control
+  // 每 5 秒切換靜音以示範控制
   delay(5000);
   es.mute(true);
   Serial.println("Muted");

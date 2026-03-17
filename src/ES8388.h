@@ -4,10 +4,10 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-// ES8388 I2C Address
+// ES8388 I2C 位址
 #define ES8388_ADDR 0x10
 
-// Register Map (Simplified)
+// 暫存器映射
 #define ES8388_CONTROL1         0x00
 #define ES8388_CONTROL2         0x01
 #define ES8388_CHIPPOWER        0x02
@@ -62,54 +62,85 @@
 #define ES8388_DACCONTROL29     0x33
 #define ES8388_DACCONTROL30     0x34
 
-// Input Selection
-#define ES8388_INPUT_MIC1       0x00
-#define ES8388_INPUT_MIC2       0x01
-#define ES8388_INPUT_LINE1      0x02
-#define ES8388_INPUT_LINE2      0x03
+// I2S 格式列舉
+typedef enum {
+    ES8388_I2S_NORMAL = 0,
+    ES8388_I2S_LEFT,
+    ES8388_I2S_RIGHT,
+    ES8388_I2S_DSP
+} ES8388_I2S_Fmt;
 
-// Output Selection
+// 輸出通道定義
 #define ES8388_OUTPUT_LOUT1     0x01
 #define ES8388_OUTPUT_LOUT2     0x02
 #define ES8388_OUTPUT_ROUT1     0x04
 #define ES8388_OUTPUT_ROUT2     0x08
 
+// 類比輸入路徑
+typedef enum {
+    ES8388_MIC1 = 0,
+    ES8388_MIC2,
+    ES8388_LINE1,
+    ES8388_LINE2,
+    ES8388_DIFF_MIC1, // 差分 MIC1
+    ES8388_DIFF_MIC2  // 差分 MIC2
+} ES8388_InputPath;
+
 class ES8388 {
 public:
     ES8388();
     
-    // Initialize the codec
+    // 初始化編解碼器
     bool begin(TwoWire *wire = &Wire);
     
-    // Set output volume (0-100)
-    void setVolume(uint8_t volume);
+    // 系統控制
+    void reset();
+    void dumpRegisters();
+
+    // 電源管理
+    void powerDown();
+    void powerUp();
+    void standby();
     
-    // Mute/Unmute output
+    // 音量控制
+    void setVolume(uint8_t volume); // 0-100
     void mute(bool enable);
+    void muteDAC(bool enable);
+    void muteADC(bool enable);
     
-    // Select input source
-    void setInput(uint8_t input);
-    
-    // Select output destination (can be ORed)
-    void setOutput(uint8_t output);
-    
-    // Configure I2S format (bits: 16/24/32, rate: sample rate)
-    // Note: Basic configuration, advanced users might need direct register access
+    // 輸入/輸出路徑
+    void setInput(ES8388_InputPath input);
+    void setInput(uint8_t input); // 相容舊 API
+    void setOutput(uint8_t output); // 使用 ES8388_OUTPUT_xxx 常數
+    void setOutputMixer(bool left_mix, bool right_mix);
+    void enableAnalogBypass(bool enable); // 啟用類比直通 (Mic -> Output)
+
+    // I2S 設定
     void config(uint8_t bits, uint32_t sampleRate);
+    void setI2SFormat(ES8388_I2S_Fmt fmt);
+    void setMasterMode(bool enable);
 
-    // Advanced Audio Controls
-    void setMicGain(uint8_t gainDb); // 0-24 dB
-    void setHPF(bool enable);
+    // ADC 進階控制
+    void setMicGain(uint8_t gainDb); // 0-24 dB (每 3dB 一階)
+    void setALC(bool enable, uint8_t maxGain, uint8_t minGain, uint8_t target, uint8_t holdTime, uint8_t decayTime, uint8_t attackTime);
     void setNoiseGate(uint8_t threshold); // 0-31
-    void setVolumeRaw(uint8_t vol_l, uint8_t vol_r); // 0-192 (0=0dB, 192=-96dB)
+    void setHPF(bool enable, uint8_t cutoff = 0);
 
-    // Direct register access
+    // DAC 進階控制
+    void setDeemphasis(bool enable); // 44.1kHz 去加重
+    void setVolumeRaw(uint8_t vol_l, uint8_t vol_r);
+
+    // 直接存取暫存器
     void writeRegister(uint8_t reg, uint8_t value);
     uint8_t readRegister(uint8_t reg);
 
 private:
     TwoWire *_wire;
     uint8_t _address;
+    
+    // 內部輔助函式
+    void setBitsPerSample(uint8_t bits);
+    void setSampleRate(uint32_t rate);
 };
 
 #endif
